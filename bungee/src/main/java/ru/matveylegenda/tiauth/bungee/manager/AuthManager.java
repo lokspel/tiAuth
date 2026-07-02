@@ -30,10 +30,13 @@ import ru.matveylegenda.tiauth.database.Database;
 import ru.matveylegenda.tiauth.database.model.AuthUser;
 import ru.matveylegenda.tiauth.hash.Hash;
 import ru.matveylegenda.tiauth.hash.HashFactory;
+import ru.matveylegenda.tiauth.util.PasswordCheck;
 import ru.matveylegenda.tiauth.util.PlayerLock;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -79,9 +82,7 @@ public class AuthManager {
             return;
         }
 
-        if (rejectEmptyPassword(player, password) ||
-                rejectInvalidPasswordLength(player, password) ||
-                rejectInvalidPasswordPattern(player, password)) {
+        if (rejectPassword(player, password, PasswordCheck.EMPTY, PasswordCheck.LENGTH, PasswordCheck.PATTERN)) {
             return;
         }
 
@@ -110,12 +111,11 @@ public class AuthManager {
     public void unregisterPlayer(ProxiedPlayer player, String password) {
         String name = player.getName();
 
-        playerLock.execute(name, () -> {
-            if (rejectInvalidPasswordLength(player, password)) {
-                return CompletableFuture.completedFuture(null);
-            }
+        if (rejectPassword(player, password, PasswordCheck.LENGTH)) {
+            return;
+        }
 
-            return database.getAuthUserRepository().getUser(name)
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
                     .thenCompose(user -> {
                         if (!hash.verifyPassword(password, user.getPassword())) {
                             BungeeUtils.sendMessage(player, CachedMessages.IMP.player.checkPassword.wrongPassword);
@@ -132,8 +132,7 @@ public class AuthManager {
                         if (throwable != null) {
                             BungeeUtils.sendMessage(player, CachedMessages.IMP.queryError);
                         }
-                    });
-        });
+                    }));
     }
 
     public CompletableFuture<Boolean> unregisterPlayer(String playerName) {
@@ -160,7 +159,7 @@ public class AuthManager {
             return;
         }
 
-        if (rejectEmptyPassword(player, password)) {
+        if (rejectPassword(player, password, PasswordCheck.EMPTY)) {
             return;
         }
 
@@ -198,15 +197,10 @@ public class AuthManager {
     public void changePasswordPlayer(ProxiedPlayer player, String oldPassword, String newPassword) {
         String name = player.getName();
 
-        if (rejectEmptyPassword(player, oldPassword) || rejectEmptyPassword(player, newPassword)) {
+        if (rejectPassword(player, oldPassword, PasswordCheck.EMPTY, PasswordCheck.LENGTH)) {
             return;
         }
-
-        if (rejectInvalidPasswordLength(player, oldPassword) || rejectInvalidPasswordLength(player, newPassword)) {
-            return;
-        }
-
-        if (rejectInvalidPasswordPattern(player, newPassword)) {
+        if (rejectPassword(player, newPassword, PasswordCheck.EMPTY, PasswordCheck.LENGTH, PasswordCheck.PATTERN)) {
             return;
         }
 
@@ -218,9 +212,7 @@ public class AuthManager {
                         }
 
                         return updatePasswordAsync(name, newPassword)
-                                .thenAccept(result -> {
-                                    BungeeUtils.sendMessage(player, CachedMessages.IMP.player.changePassword.success);
-                                });
+                                .thenAccept(result -> BungeeUtils.sendMessage(player, CachedMessages.IMP.player.changePassword.success));
                     })
                     .whenComplete((result, throwable) -> {
                         if (throwable != null) {
@@ -271,11 +263,9 @@ public class AuthManager {
 
     public void togglePremium(ProxiedPlayer player) {
         String name = player.getName();
+        boolean isPremium = PremiumCache.isPremium(name);
 
-        playerLock.execute(name, () -> {
-            boolean isPremium = PremiumCache.isPremium(name);
-
-            return database.getAuthUserRepository().setPremium(name, !isPremium)
+        playerLock.execute(name, () -> database.getAuthUserRepository().setPremium(name, !isPremium)
                     .thenAccept(result -> {
                         if (isPremium) {
                             PremiumCache.removePremium(name);
@@ -289,8 +279,7 @@ public class AuthManager {
                         if (throwable != null) {
                             BungeeUtils.sendMessage(player, CachedMessages.IMP.queryError);
                         }
-                    });
-        });
+                    }));
     }
 
     public void forceAuth(ProxiedPlayer player, PostLoginEvent event) {
@@ -563,46 +552,33 @@ public class AuthManager {
         return player.getPendingConnection().getVersion() >= 771;
     }
 
-    private boolean rejectEmptyPassword(ProxiedPlayer player, String password) {
-        if (password.isEmpty()) {
-            BungeeUtils.sendMessage(player, CachedMessages.IMP.player.checkPassword.passwordEmpty);
-            if (supportsDialog(player)) {
-                showLoginDialog(player, CachedMessages.IMP.player.dialog.notifications.passwordEmpty);
-            }
-            return true;
-        }
-        return false;
-    }
+    private boolean rejectPassword(ProxiedPlayer player, String password, PasswordCheck... checks) {
+        Set<PasswordCheck> checkSet = EnumSet.copyOf(Arrays.asList(checks));
+        String errorMessage;
+        String dialogMessage;
 
-    private boolean rejectInvalidPasswordLength(ProxiedPlayer player, String password) {
-        if (password.length() < MainConfig.IMP.auth.minPasswordLength ||
-                password.length() > MainConfig.IMP.auth.maxPasswordLength) {
-            BungeeUtils.sendMessage(
-                    player,
-                    CachedMessages.IMP.player.checkPassword.invalidLength
-                            .replace("{min}", String.valueOf(MainConfig.IMP.auth.minPasswordLength))
-                            .replace("{max}", String.valueOf(MainConfig.IMP.auth.maxPasswordLength))
-            );
-            if (supportsDialog(player)) {
-                showLoginDialog(player,
-                        CachedMessages.IMP.player.dialog.notifications.invalidLength
-                                .replace("{min}", String.valueOf(MainConfig.IMP.auth.minPasswordLength))
-                                .replace("{max}", String.valueOf(MainConfig.IMP.auth.maxPasswordLength))
-                );
-            }
-            return true;
+        if (checkSet.contains(PasswordCheck.EMPTY) && password.isEmpty()) {
+            errorMessage = CachedMessages.IMP.player.checkPassword.passwordEmpty;
+            dialogMessage = CachedMessages.IMP.player.dialog.notifications.passwordEmpty;
+        } else if (checkSet.contains(PasswordCheck.LENGTH) && (password.length() < MainConfig.IMP.auth.minPasswordLength ||
+                password.length() > MainConfig.IMP.auth.maxPasswordLength)) {
+            errorMessage = CachedMessages.IMP.player.checkPassword.invalidLength
+                    .replace("{min}", String.valueOf(MainConfig.IMP.auth.minPasswordLength))
+                    .replace("{max}", String.valueOf(MainConfig.IMP.auth.maxPasswordLength));
+            dialogMessage = CachedMessages.IMP.player.dialog.notifications.invalidLength
+                    .replace("{min}", String.valueOf(MainConfig.IMP.auth.minPasswordLength))
+                    .replace("{max}", String.valueOf(MainConfig.IMP.auth.maxPasswordLength));
+        } else if (checkSet.contains(PasswordCheck.PATTERN) && !passwordPattern.matcher(password).matches()) {
+            errorMessage = CachedMessages.IMP.player.checkPassword.invalidPattern;
+            dialogMessage = CachedMessages.IMP.player.dialog.notifications.invalidPattern;
+        } else {
+            return false;
         }
-        return false;
-    }
 
-    private boolean rejectInvalidPasswordPattern(ProxiedPlayer player, String password) {
-        if (!passwordPattern.matcher(password).matches()) {
-            BungeeUtils.sendMessage(player, CachedMessages.IMP.player.checkPassword.invalidPattern);
-            if (supportsDialog(player)) {
-                showLoginDialog(player, CachedMessages.IMP.player.dialog.notifications.invalidPattern);
-            }
-            return true;
+        BungeeUtils.sendMessage(player, errorMessage);
+        if (supportsDialog(player)) {
+            showLoginDialog(player, dialogMessage);
         }
-        return false;
+        return true;
     }
 }
