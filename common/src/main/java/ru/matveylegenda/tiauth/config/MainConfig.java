@@ -253,9 +253,9 @@ public class MainConfig extends YamlSerializable {
             public boolean enabled = true;
 
             @Comment({
-                    @CommentValue("Название издателя, отображаемое в приложении-аутентификаторе")
+                    @CommentValue("Отображаемое имя в приложении-аутентификаторе")
             })
-            public String issuer = "tiAuth";
+            public String issuer = "Your Minecraft Server";
 
             @Comment({
                     @CommentValue("URL для генерации QR-кода. {data} заменяется на otpauth:// URI")
