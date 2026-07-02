@@ -177,7 +177,7 @@ public class AuthListener {
         int count = 0;
 
         for (Player player : proxyServer.getAllPlayers()) {
-            String playerIp = player.getRemoteAddress().getAddress().getHostAddress();
+            String playerIp = VelocityUtils.getIp(player);
             if (playerIp.equals(ip)) {
                 count++;
             }

@@ -148,7 +148,7 @@ public class TotpManager {
             totpAttempts.remove(lowerName);
             player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.player.kick.totpTooManyAttempts));
             if (MainConfig.IMP.auth.totp.banPlayer) {
-                BanCache.addTotpBan(((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress());
+                BanCache.addTotpBan(BungeeUtils.getIp(player));
             }
             return;
         }

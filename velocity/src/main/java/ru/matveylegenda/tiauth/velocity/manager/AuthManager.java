@@ -292,7 +292,7 @@ public class AuthManager {
                         }
 
                         String sessionIP = SessionCache.getIP(name);
-                        String remoteIp = player.getRemoteAddress().getAddress().getHostAddress();
+                        String remoteIp = VelocityUtils.getIp(player);
 
                         if (PremiumCache.isPremium(name) || (sessionIP != null && sessionIP.equals(remoteIp))) {
                             AuthCache.setAuthenticated(name);
@@ -349,7 +349,7 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> completeRegistrationAsync(Player player, String name, String password) {
-        String ip = player.getRemoteAddress().getAddress().getHostAddress();
+        String ip = VelocityUtils.getIp(player);
 
         return registerUserAsync(name, password, ip)
                 .thenRun(() -> {
@@ -374,7 +374,7 @@ public class AuthManager {
         if (attempts >= MainConfig.IMP.auth.loginAttempts) {
             player.disconnect(CachedComponents.IMP.player.kick.tooManyAttempts);
             if (MainConfig.IMP.auth.banPlayer) {
-                BanCache.addPlayer(player.getRemoteAddress().getAddress().getHostAddress());
+                BanCache.addPlayer(VelocityUtils.getIp(player));
             }
             loginAttempts.remove(lowerName);
             return;
@@ -417,7 +417,7 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> authenticatePlayer(Player player, String name, boolean forceLogin) {
-        String ip = player.getRemoteAddress().getAddress().getHostAddress();
+        String ip = VelocityUtils.getIp(player);
 
         AuthCache.setAuthenticated(name);
         database.getAuthUserRepository().updateLastLogin(name);

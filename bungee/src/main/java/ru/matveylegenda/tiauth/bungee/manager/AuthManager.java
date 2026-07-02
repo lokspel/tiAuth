@@ -304,7 +304,7 @@ public class AuthManager {
                         String sessionIP = SessionCache.getIP(name);
 
                         if (PremiumCache.isPremium(name) ||
-                                (sessionIP != null && sessionIP.equals(((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress()))) {
+                                (sessionIP != null && sessionIP.equals(BungeeUtils.getIp(player)))) {
                             AuthCache.setAuthenticated(name);
 
                             if (event != null) {
@@ -419,7 +419,7 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> completeRegistrationAsync(ProxiedPlayer player, String name, String password) {
-        String ip = ((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress();
+        String ip = BungeeUtils.getIp(player);
 
         return registerUserAsync(name, password, ip)
                 .thenRun(() -> {
@@ -444,7 +444,7 @@ public class AuthManager {
         if (attempts >= MainConfig.IMP.auth.loginAttempts) {
             player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.player.kick.tooManyAttempts));
             if (MainConfig.IMP.auth.banPlayer) {
-                BanCache.addPlayer(((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress());
+                BanCache.addPlayer(BungeeUtils.getIp(player));
             }
             loginAttempts.remove(lowerName);
             return;
@@ -488,7 +488,7 @@ public class AuthManager {
     }
 
     private void authenticatePlayer(ProxiedPlayer player, String name, boolean forceLogin) {
-        String ip = ((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress();
+        String ip = BungeeUtils.getIp(player);
 
         AuthCache.setAuthenticated(name);
         database.getAuthUserRepository().updateLastLogin(name);

@@ -200,7 +200,7 @@ public class AuthListener implements Listener {
         int count = 0;
 
         for (ProxiedPlayer player : ProxyServer.getInstance().getPlayers()) {
-            String playerIp = ((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress();
+            String playerIp = BungeeUtils.getIp(player);
             if (playerIp.equals(ip)) {
                 count++;
             }

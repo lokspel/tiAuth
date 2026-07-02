@@ -15,6 +15,7 @@ import ru.matveylegenda.tiauth.hash.HashType;
 import ru.matveylegenda.tiauth.util.EncryptionUtils;
 import ru.matveylegenda.tiauth.velocity.TiAuth;
 import ru.matveylegenda.tiauth.util.PlayerLock;
+import ru.matveylegenda.tiauth.velocity.util.VelocityUtils;
 import ru.matveylegenda.tiauth.velocity.storage.CachedComponents;
 
 import java.util.Locale;
@@ -144,7 +145,7 @@ public class TotpManager {
             totpAttempts.remove(lowerName);
             player.disconnect(CachedComponents.IMP.player.kick.totpTooManyAttempts);
             if (MainConfig.IMP.auth.totp.banPlayer) {
-                BanCache.addTotpBan(player.getRemoteAddress().getAddress().getHostAddress());
+                BanCache.addTotpBan(VelocityUtils.getIp(player));
             }
             return;
         }
