@@ -159,7 +159,7 @@ public class AuthManager {
                         }
 
                         if (!hash.verifyPassword(password, user.getPassword())) {
-                            handleWrongPasswordAttempt(player, name);
+                            processFailedLogin(player, name);
                             return CompletableFuture.completedFuture(null);
                         }
 
@@ -367,7 +367,7 @@ public class AuthManager {
                 });
     }
 
-    private void handleWrongPasswordAttempt(Player player, String name) {
+    private void processFailedLogin(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = loginAttempts.merge(lowerName, 1, Integer::sum);
 
@@ -380,19 +380,15 @@ public class AuthManager {
             return;
         }
 
-        player.sendMessage(
+        reject(
+                player,
                 CachedComponents.IMP.player.login.wrongPassword.replaceText(builder -> builder
+                        .match(VelocityUtils.ATTEMPTS)
+                        .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts))),
+                CachedComponents.IMP.player.dialog.notifications.wrongPassword.replaceText(builder -> builder
                         .match(VelocityUtils.ATTEMPTS)
                         .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts)))
         );
-
-        if (supportsDialog(player)) {
-            showLoginDialog(player,
-                    CachedComponents.IMP.player.dialog.notifications.wrongPassword.replaceText(builder -> builder
-                            .match(VelocityUtils.ATTEMPTS)
-                            .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts)))
-            );
-        }
     }
 
     private CompletableFuture<Void> processSuccessfulLoginAsync(Player player, String name) {
@@ -449,11 +445,9 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> connectToBackend(Player player) {
-        Optional<RegisteredServer> backend = getBackend(player);
-        if (backend.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        return connect(player, backend.get());
+        return getBackend(player)
+                .map(backend -> connect(player, backend))
+                .orElseGet(() -> CompletableFuture.completedFuture(null));
     }
 
     private Optional<RegisteredServer> getBackend(Player player) {
@@ -489,6 +483,20 @@ public class AuthManager {
         return false;
     }
 
+    boolean reject(
+            Player player,
+            Component chat,
+            Component dialog
+    ) {
+        player.sendMessage(chat);
+
+        if (supportsDialog(player)) {
+            showLoginDialog(player, dialog);
+        }
+
+        return true;
+    }
+
     private boolean rejectPassword(Player player, String password, PasswordCheck... checks) {
         Set<PasswordCheck> checkSet = EnumSet.copyOf(Arrays.asList(checks));
         Component errorMessage;
@@ -520,10 +528,6 @@ public class AuthManager {
             return false;
         }
 
-        player.sendMessage(errorMessage);
-        if (supportsDialog(player)) {
-            showLoginDialog(player, dialogMessage);
-        }
-        return true;
+        return reject(player, errorMessage, dialogMessage);
     }
 }

@@ -345,6 +345,7 @@ public class CachedComponents {
         player.dialog.notifications.mismatch = LEGACY.deserialize(COLORIZER.colorize(getPrefixed(config.player.dialog.notifications.mismatch, prefixRaw)));
         player.dialog.notifications.passwordEmpty = LEGACY.deserialize(COLORIZER.colorize(getPrefixed(config.player.dialog.notifications.passwordEmpty, prefixRaw)));
 
+
         player.bossBar = new Player.BossBar();
         player.bossBar.message = LEGACY.deserialize(COLORIZER.colorize(getPrefixed(config.player.bossBar.message, prefixRaw)));
 

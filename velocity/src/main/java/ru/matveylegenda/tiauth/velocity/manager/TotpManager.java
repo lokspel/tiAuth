@@ -101,7 +101,7 @@ public class TotpManager {
                         } else if (TOTP_CODE_VERIFIER.isValidCode(totpToken, code)) {
                             return completeTotpLoginAsync(player, name);
                         } else {
-                            handleWrongTotpAttempt(player, name);
+                            processFailedTotpAttempt(player, name);
                             return CompletableFuture.completedFuture(null);
                         }
                     })
@@ -137,7 +137,7 @@ public class TotpManager {
                 });
     }
 
-    private void handleWrongTotpAttempt(Player player, String name) {
+    private void processFailedTotpAttempt(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = totpAttempts.merge(lowerName, 1, Integer::sum);
         if (attempts >= MainConfig.IMP.auth.totp.maxAttempts) {
@@ -162,7 +162,7 @@ public class TotpManager {
                         return database.getRecoveryCodeRepository().removeCode(hashedCode)
                                 .thenCompose(result -> completeTotpLoginAsync(player, name));
                     } else {
-                        handleWrongTotpAttempt(player, name);
+                        processFailedTotpAttempt(player, name);
                         return CompletableFuture.completedFuture(null);
                     }
                 });

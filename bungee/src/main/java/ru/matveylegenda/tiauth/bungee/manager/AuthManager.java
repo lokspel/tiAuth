@@ -171,7 +171,7 @@ public class AuthManager {
                         }
 
                         if (!hash.verifyPassword(password, user.getPassword())) {
-                            handleWrongPasswordAttempt(player, name);
+                            processFailedLogin(player, name);
                             return CompletableFuture.completedFuture(null);
                         }
 
@@ -437,7 +437,7 @@ public class AuthManager {
                 });
     }
 
-    private void handleWrongPasswordAttempt(ProxiedPlayer player, String name) {
+    private void processFailedLogin(ProxiedPlayer player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = loginAttempts.merge(lowerName, 1, Integer::sum);
 
@@ -450,19 +450,13 @@ public class AuthManager {
             return;
         }
 
-        BungeeUtils.sendMessage(
+        reject(
                 player,
                 CachedMessages.IMP.player.login.wrongPassword
+                        .replace("{attempts}", String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts)),
+                CachedMessages.IMP.player.dialog.notifications.wrongPassword
                         .replace("{attempts}", String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts))
         );
-
-        if (supportsDialog(player)) {
-            showLoginDialog(
-                    player,
-                    CachedMessages.IMP.player.dialog.notifications.wrongPassword
-                            .replace("{attempts}", String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts))
-            );
-        }
     }
 
     private CompletableFuture<Void> processSuccessfulLoginAsync(ProxiedPlayer player, String name) {
@@ -552,6 +546,20 @@ public class AuthManager {
         return player.getPendingConnection().getVersion() >= 771;
     }
 
+    boolean reject(
+            ProxiedPlayer player,
+            String chat,
+            String dialog
+    ) {
+        BungeeUtils.sendMessage(player, chat);
+
+        if (supportsDialog(player)) {
+            showLoginDialog(player, dialog);
+        }
+
+        return true;
+    }
+
     private boolean rejectPassword(ProxiedPlayer player, String password, PasswordCheck... checks) {
         Set<PasswordCheck> checkSet = EnumSet.copyOf(Arrays.asList(checks));
         String errorMessage;
@@ -575,10 +583,6 @@ public class AuthManager {
             return false;
         }
 
-        BungeeUtils.sendMessage(player, errorMessage);
-        if (supportsDialog(player)) {
-            showLoginDialog(player, dialogMessage);
-        }
-        return true;
+        return reject(player, errorMessage, dialogMessage);
     }
 }
