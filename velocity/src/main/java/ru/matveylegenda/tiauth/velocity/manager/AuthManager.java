@@ -19,10 +19,14 @@ import ru.matveylegenda.tiauth.hash.HashFactory;
 import ru.matveylegenda.tiauth.velocity.TiAuth;
 import ru.matveylegenda.tiauth.velocity.api.event.PlayerAuthEvent;
 import ru.matveylegenda.tiauth.velocity.api.event.PlayerRegisterEvent;
+import ru.matveylegenda.tiauth.util.PasswordCheck;
+import ru.matveylegenda.tiauth.util.PlayerLock;
 import ru.matveylegenda.tiauth.velocity.storage.CachedComponents;
 import ru.matveylegenda.tiauth.velocity.util.VelocityUtils;
 
 import java.net.InetSocketAddress;
+import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -33,7 +37,7 @@ import java.util.regex.Pattern;
 
 public class AuthManager {
 
-    private final Set<String> inProcess = ConcurrentHashMap.newKeySet();
+    private final PlayerLock playerLock = new PlayerLock();
     private final Set<String> pendingVerifications = ConcurrentHashMap.newKeySet();
     private final Set<String> totpPendingPlayers = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> loginAttempts = new ConcurrentHashMap<>();
@@ -66,31 +70,24 @@ public class AuthManager {
             return;
         }
 
-        if (rejectEmptyPassword(player, password) ||
-                rejectInvalidPasswordLength(player, password) ||
-                rejectInvalidPasswordPattern(player, password)) {
+        if (rejectPassword(player, password, PasswordCheck.EMPTY, PasswordCheck.LENGTH, PasswordCheck.PATTERN)) {
             return;
         }
 
-        if (!inProcess.add(name)) {
-            return;
-        }
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
+                    .thenCompose(user -> {
+                        if (user != null) {
+                            player.sendMessage(CachedComponents.IMP.player.register.alreadyRegistered);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-        database.getAuthUserRepository().getUser(name)
-                .thenCompose(user -> {
-                    if (user != null) {
-                        player.sendMessage(CachedComponents.IMP.player.register.alreadyRegistered);
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    return completeRegistrationAsync(player, name, password);
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.disconnect(CachedComponents.IMP.queryError);
-                    }
-                    inProcess.remove(name);
-                });
+                        return completeRegistrationAsync(player, name, password);
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.disconnect(CachedComponents.IMP.queryError);
+                        }
+                    }));
     }
 
     public CompletableFuture<Boolean> registerPlayer(String playerName, String password, String ip) {
@@ -102,34 +99,28 @@ public class AuthManager {
     public void unregisterPlayer(Player player, String password) {
         String name = player.getUsername();
 
-        if (!inProcess.add(name)) {
+        if (rejectPassword(player, password, PasswordCheck.LENGTH)) {
             return;
         }
 
-        if (rejectInvalidPasswordLength(player, password)) {
-            inProcess.remove(name);
-            return;
-        }
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
+                    .thenCompose(user -> {
+                        if (!hash.verifyPassword(password, user.getPassword())) {
+                            player.sendMessage(CachedComponents.IMP.player.checkPassword.wrongPassword);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-        database.getAuthUserRepository().getUser(name)
-                .thenCompose(user -> {
-                    if (!hash.verifyPassword(password, user.getPassword())) {
-                        player.sendMessage(CachedComponents.IMP.player.checkPassword.wrongPassword);
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    return database.getAuthUserRepository().deleteUser(name)
-                            .thenAccept(result -> {
-                                SessionCache.removePlayer(name);
-                                player.disconnect(CachedComponents.IMP.player.unregister.success);
-                            });
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.sendMessage(CachedComponents.IMP.queryError);
-                    }
-                    inProcess.remove(name);
-                });
+                        return database.getAuthUserRepository().deleteUser(name)
+                                .thenAccept(result -> {
+                                    SessionCache.removePlayer(name);
+                                    player.disconnect(CachedComponents.IMP.player.unregister.success);
+                                });
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.sendMessage(CachedComponents.IMP.queryError);
+                        }
+                    }));
     }
 
     public CompletableFuture<Boolean> unregisterPlayer(String playerName) {
@@ -156,38 +147,33 @@ public class AuthManager {
             return;
         }
 
-        if (rejectEmptyPassword(player, password)) {
+        if (rejectPassword(player, password, PasswordCheck.EMPTY)) {
             return;
         }
 
-        if (!inProcess.add(name)) {
-            return;
-        }
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
+                    .thenCompose(user -> {
+                        if (user == null) {
+                            player.sendMessage(CachedComponents.IMP.player.login.notRegistered);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-        database.getAuthUserRepository().getUser(name)
-                .thenCompose(user -> {
-                    if (user == null) {
-                        player.sendMessage(CachedComponents.IMP.player.login.notRegistered);
-                        return CompletableFuture.completedFuture(null);
-                    }
+                        if (!hash.verifyPassword(password, user.getPassword())) {
+                            processFailedLogin(player, name);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-                    if (!hash.verifyPassword(password, user.getPassword())) {
-                        handleWrongPasswordAttempt(player, name);
-                        return CompletableFuture.completedFuture(null);
-                    }
+                        if (plugin.getTotpManager().requireTotpChallenge(player, user)) {
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-                    if (plugin.getTotpManager().requireTotpChallenge(player, user)) {
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    return processSuccessfulLoginAsync(player, name);
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.disconnect(CachedComponents.IMP.queryError);
-                    }
-                    inProcess.remove(name);
-                });
+                        return processSuccessfulLoginAsync(player, name);
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.disconnect(CachedComponents.IMP.queryError);
+                        }
+                    }));
     }
 
     public CompletableFuture<Void> loginPlayer(Player player, boolean forceLogin) {
@@ -198,40 +184,28 @@ public class AuthManager {
     public void changePasswordPlayer(Player player, String oldPassword, String newPassword) {
         String name = player.getUsername();
 
-        if (rejectEmptyPassword(player, oldPassword) || rejectEmptyPassword(player, newPassword)) {
+        if (rejectPassword(player, oldPassword, PasswordCheck.EMPTY, PasswordCheck.LENGTH)) {
+            return;
+        }
+        if (rejectPassword(player, newPassword, PasswordCheck.EMPTY, PasswordCheck.LENGTH, PasswordCheck.PATTERN)) {
             return;
         }
 
-        if (rejectInvalidPasswordLength(player, oldPassword) || rejectInvalidPasswordLength(player, newPassword)) {
-            return;
-        }
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
+                    .thenCompose(user -> {
+                        if (!hash.verifyPassword(oldPassword, user.getPassword())) {
+                            player.sendMessage(CachedComponents.IMP.player.checkPassword.wrongPassword);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-        if (rejectInvalidPasswordPattern(player, newPassword)) {
-            return;
-        }
-
-        if (!inProcess.add(name)) {
-            return;
-        }
-
-        database.getAuthUserRepository().getUser(name)
-                .thenCompose(user -> {
-                    if (!hash.verifyPassword(oldPassword, user.getPassword())) {
-                        player.sendMessage(CachedComponents.IMP.player.checkPassword.wrongPassword);
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    return updatePasswordAsync(name, newPassword)
-                            .thenAccept(result -> {
-                                player.sendMessage(CachedComponents.IMP.player.changePassword.success);
-                            });
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.sendMessage(CachedComponents.IMP.queryError);
-                    }
-                    inProcess.remove(name);
-                });
+                        return updatePasswordAsync(name, newPassword)
+                                .thenAccept(result -> player.sendMessage(CachedComponents.IMP.player.changePassword.success));
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.sendMessage(CachedComponents.IMP.queryError);
+                        }
+                    }));
     }
 
     public CompletableFuture<Boolean> changePasswordPlayer(String playerName, String password) {
@@ -276,29 +250,23 @@ public class AuthManager {
 
     public void togglePremium(Player player) {
         String name = player.getUsername();
-
-        if (!inProcess.add(name)) {
-            return;
-        }
-
         boolean isPremium = PremiumCache.isPremium(name);
 
-        database.getAuthUserRepository().setPremium(name, !isPremium)
-                .thenAccept(result -> {
-                    if (isPremium) {
-                        PremiumCache.removePremium(name);
-                        player.sendMessage(CachedComponents.IMP.player.premium.disabled);
-                    } else {
-                        PremiumCache.addPremium(name);
-                        player.sendMessage(CachedComponents.IMP.player.premium.enabled);
-                    }
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.sendMessage(CachedComponents.IMP.queryError);
-                    }
-                    inProcess.remove(name);
-                });
+        playerLock.execute(name, () -> database.getAuthUserRepository().setPremium(name, !isPremium)
+                    .thenAccept(result -> {
+                        if (isPremium) {
+                            PremiumCache.removePremium(name);
+                            player.sendMessage(CachedComponents.IMP.player.premium.disabled);
+                        } else {
+                            PremiumCache.addPremium(name);
+                            player.sendMessage(CachedComponents.IMP.player.premium.enabled);
+                        }
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.sendMessage(CachedComponents.IMP.queryError);
+                        }
+                    }));
     }
 
     public void forceAuth(Player player, PlayerChooseInitialServerEvent event, CompletableFuture<Void> future) {
@@ -324,7 +292,7 @@ public class AuthManager {
                         }
 
                         String sessionIP = SessionCache.getIP(name);
-                        String remoteIp = player.getRemoteAddress().getAddress().getHostAddress();
+                        String remoteIp = VelocityUtils.getIp(player);
 
                         if (PremiumCache.isPremium(name) || (sessionIP != null && sessionIP.equals(remoteIp))) {
                             AuthCache.setAuthenticated(name);
@@ -381,7 +349,7 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> completeRegistrationAsync(Player player, String name, String password) {
-        String ip = player.getRemoteAddress().getAddress().getHostAddress();
+        String ip = VelocityUtils.getIp(player);
 
         return registerUserAsync(name, password, ip)
                 .thenRun(() -> {
@@ -399,32 +367,28 @@ public class AuthManager {
                 });
     }
 
-    private void handleWrongPasswordAttempt(Player player, String name) {
+    private void processFailedLogin(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = loginAttempts.merge(lowerName, 1, Integer::sum);
 
         if (attempts >= MainConfig.IMP.auth.loginAttempts) {
             player.disconnect(CachedComponents.IMP.player.kick.tooManyAttempts);
             if (MainConfig.IMP.auth.banPlayer) {
-                BanCache.addPlayer(player.getRemoteAddress().getAddress().getHostAddress());
+                BanCache.addPlayer(VelocityUtils.getIp(player));
             }
             loginAttempts.remove(lowerName);
             return;
         }
 
-        player.sendMessage(
+        reject(
+                player,
                 CachedComponents.IMP.player.login.wrongPassword.replaceText(builder -> builder
+                        .match(VelocityUtils.ATTEMPTS)
+                        .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts))),
+                CachedComponents.IMP.player.dialog.notifications.wrongPassword.replaceText(builder -> builder
                         .match(VelocityUtils.ATTEMPTS)
                         .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts)))
         );
-
-        if (supportsDialog(player)) {
-            showLoginDialog(player,
-                    CachedComponents.IMP.player.dialog.notifications.wrongPassword.replaceText(builder -> builder
-                            .match(VelocityUtils.ATTEMPTS)
-                            .replacement(String.valueOf(MainConfig.IMP.auth.loginAttempts - attempts)))
-            );
-        }
     }
 
     private CompletableFuture<Void> processSuccessfulLoginAsync(Player player, String name) {
@@ -449,7 +413,7 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> authenticatePlayer(Player player, String name, boolean forceLogin) {
-        String ip = player.getRemoteAddress().getAddress().getHostAddress();
+        String ip = VelocityUtils.getIp(player);
 
         AuthCache.setAuthenticated(name);
         database.getAuthUserRepository().updateLastLogin(name);
@@ -481,11 +445,9 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> connectToBackend(Player player) {
-        Optional<RegisteredServer> backend = getBackend(player);
-        if (backend.isEmpty()) {
-            return CompletableFuture.completedFuture(null);
-        }
-        return connect(player, backend.get());
+        return getBackend(player)
+                .map(backend -> connect(player, backend))
+                .orElseGet(() -> CompletableFuture.completedFuture(null));
     }
 
     private Optional<RegisteredServer> getBackend(Player player) {
@@ -521,53 +483,51 @@ public class AuthManager {
         return false;
     }
 
-    private boolean rejectEmptyPassword(Player player, String password) {
-        if (password.isEmpty()) {
-            player.sendMessage(CachedComponents.IMP.player.checkPassword.passwordEmpty);
-            if (supportsDialog(player)) {
-                showLoginDialog(player, CachedComponents.IMP.player.dialog.notifications.passwordEmpty);
-            }
-            return true;
+    boolean reject(
+            Player player,
+            Component chat,
+            Component dialog
+    ) {
+        player.sendMessage(chat);
+
+        if (supportsDialog(player)) {
+            showLoginDialog(player, dialog);
         }
-        return false;
+
+        return true;
     }
 
-    private boolean rejectInvalidPasswordLength(Player player, String password) {
-        if (password.length() < MainConfig.IMP.auth.minPasswordLength ||
-                password.length() > MainConfig.IMP.auth.maxPasswordLength) {
-            player.sendMessage(
-                    CachedComponents.IMP.player.checkPassword.invalidLength
-                            .replaceText(builder -> builder
-                                    .match(VelocityUtils.MIN)
-                                    .replacement(String.valueOf(MainConfig.IMP.auth.minPasswordLength)))
-                            .replaceText(builder -> builder
-                                    .match(VelocityUtils.MAX)
-                                    .replacement(String.valueOf(MainConfig.IMP.auth.maxPasswordLength)))
-            );
-            if (supportsDialog(player)) {
-                showLoginDialog(player,
-                        CachedComponents.IMP.player.dialog.notifications.invalidLength
-                                .replaceText(builder -> builder
-                                        .match(VelocityUtils.MIN)
-                                        .replacement(String.valueOf(MainConfig.IMP.auth.minPasswordLength)))
-                                .replaceText(builder -> builder
-                                        .match(VelocityUtils.MAX)
-                                        .replacement(String.valueOf(MainConfig.IMP.auth.maxPasswordLength)))
-                );
-            }
-            return true;
-        }
-        return false;
-    }
+    private boolean rejectPassword(Player player, String password, PasswordCheck... checks) {
+        Set<PasswordCheck> checkSet = EnumSet.copyOf(Arrays.asList(checks));
+        Component errorMessage;
+        Component dialogMessage;
 
-    private boolean rejectInvalidPasswordPattern(Player player, String password) {
-        if (!passwordPattern.matcher(password).matches()) {
-            player.sendMessage(CachedComponents.IMP.player.checkPassword.invalidPattern);
-            if (supportsDialog(player)) {
-                showLoginDialog(player, CachedComponents.IMP.player.dialog.notifications.invalidPattern);
-            }
-            return true;
+        if (checkSet.contains(PasswordCheck.EMPTY) && password.isEmpty()) {
+            errorMessage = CachedComponents.IMP.player.checkPassword.passwordEmpty;
+            dialogMessage = CachedComponents.IMP.player.dialog.notifications.passwordEmpty;
+        } else if (checkSet.contains(PasswordCheck.LENGTH) && (password.length() < MainConfig.IMP.auth.minPasswordLength ||
+                password.length() > MainConfig.IMP.auth.maxPasswordLength)) {
+            errorMessage = CachedComponents.IMP.player.checkPassword.invalidLength
+                    .replaceText(builder -> builder
+                            .match(VelocityUtils.MIN)
+                            .replacement(String.valueOf(MainConfig.IMP.auth.minPasswordLength)))
+                    .replaceText(builder -> builder
+                            .match(VelocityUtils.MAX)
+                            .replacement(String.valueOf(MainConfig.IMP.auth.maxPasswordLength)));
+            dialogMessage = CachedComponents.IMP.player.dialog.notifications.invalidLength
+                    .replaceText(builder -> builder
+                            .match(VelocityUtils.MIN)
+                            .replacement(String.valueOf(MainConfig.IMP.auth.minPasswordLength)))
+                    .replaceText(builder -> builder
+                            .match(VelocityUtils.MAX)
+                            .replacement(String.valueOf(MainConfig.IMP.auth.maxPasswordLength)));
+        } else if (checkSet.contains(PasswordCheck.PATTERN) && !passwordPattern.matcher(password).matches()) {
+            errorMessage = CachedComponents.IMP.player.checkPassword.invalidPattern;
+            dialogMessage = CachedComponents.IMP.player.dialog.notifications.invalidPattern;
+        } else {
+            return false;
         }
-        return false;
+
+        return reject(player, errorMessage, dialogMessage);
     }
 }

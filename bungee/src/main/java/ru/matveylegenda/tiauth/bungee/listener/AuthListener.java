@@ -12,6 +12,7 @@ import ru.matveylegenda.tiauth.bungee.TiAuth;
 import ru.matveylegenda.tiauth.bungee.manager.AuthManager;
 import ru.matveylegenda.tiauth.bungee.manager.TaskManager;
 import ru.matveylegenda.tiauth.bungee.storage.CachedMessages;
+import ru.matveylegenda.tiauth.bungee.util.BungeeUtils;
 import ru.matveylegenda.tiauth.cache.AuthCache;
 import ru.matveylegenda.tiauth.cache.BanCache;
 import ru.matveylegenda.tiauth.cache.PremiumCache;
@@ -200,7 +201,7 @@ public class AuthListener implements Listener {
         int count = 0;
 
         for (ProxiedPlayer player : ProxyServer.getInstance().getPlayers()) {
-            String playerIp = ((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress();
+            String playerIp = BungeeUtils.getIp(player);
             if (playerIp.equals(ip)) {
                 count++;
             }

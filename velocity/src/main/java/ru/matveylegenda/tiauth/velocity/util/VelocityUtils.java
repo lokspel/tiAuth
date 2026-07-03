@@ -1,5 +1,6 @@
 package ru.matveylegenda.tiauth.velocity.util;
 
+import com.velocitypowered.api.proxy.Player;
 import lombok.experimental.UtilityClass;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
@@ -22,5 +23,9 @@ public class VelocityUtils {
             return;
         }
         sender.sendMessage(message);
+    }
+
+    public String getIp(Player player) {
+        return player.getRemoteAddress().getAddress().getHostAddress();
     }
 }

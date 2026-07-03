@@ -17,6 +17,7 @@ import ru.matveylegenda.tiauth.hash.Hash;
 import ru.matveylegenda.tiauth.hash.HashFactory;
 import ru.matveylegenda.tiauth.hash.HashType;
 import ru.matveylegenda.tiauth.util.EncryptionUtils;
+import ru.matveylegenda.tiauth.util.PlayerLock;
 
 import java.net.InetSocketAddress;
 import java.util.Locale;
@@ -35,7 +36,7 @@ public class TotpManager {
     private final TiAuth plugin;
     private final Database database;
 
-    private final Set<String> inProcess = ConcurrentHashMap.newKeySet();
+    private final PlayerLock playerLock = new PlayerLock();
     private final Map<String, Integer> totpAttempts = new ConcurrentHashMap<>();
     private final Map<String, String> totpEnableSecrets = new ConcurrentHashMap<>();
 
@@ -66,7 +67,7 @@ public class TotpManager {
         authManager.clearTotpPending(playerName);
         authManager.clearPendingVerification(playerName);
         totpAttempts.remove(lowerName);
-        inProcess.remove(playerName);
+        playerLock.unlock(playerName);
     }
 
     public void processTotpChallenge(ProxiedPlayer player, String code) {
@@ -76,47 +77,42 @@ public class TotpManager {
             return;
         }
 
-        if (!inProcess.add(name)) {
-            return;
-        }
+        playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
+                    .thenCompose(user -> {
+                        if (user == null) {
+                            authManager.clearTotpPending(name);
+                            BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.notRegistered);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-        database.getAuthUserRepository().getUser(name)
-                .thenCompose(user -> {
-                    if (user == null) {
-                        authManager.clearTotpPending(name);
-                        BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.notRegistered);
-                        return CompletableFuture.completedFuture(null);
-                    }
+                        if (user.getTotpToken() == null || user.getTotpToken().isEmpty()) {
+                            authManager.clearTotpPending(name);
+                            return authManager.loginPlayer(player, false)
+                                    .thenRun(() -> BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.success));
+                        }
 
-                    if (user.getTotpToken() == null || user.getTotpToken().isEmpty()) {
-                        authManager.clearTotpPending(name);
-                        return authManager.loginPlayer(player, false)
-                                .thenRun(() -> BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.success));
-                    }
+                        String totpToken;
+                        try {
+                            totpToken = EncryptionUtils.decrypt(user.getTotpToken(), plugin.getSecretKey());
+                        } catch (Exception e) {
+                            plugin.getLogger().log(java.util.logging.Level.SEVERE, "Error during secret decryption", e);
+                            return CompletableFuture.completedFuture(null);
+                        }
 
-                    String totpToken;
-                    try {
-                        totpToken = EncryptionUtils.decrypt(user.getTotpToken(), plugin.getSecretKey());
-                    } catch (Exception e) {
-                        plugin.getLogger().log(java.util.logging.Level.SEVERE, "Error during secret decryption", e);
-                        return CompletableFuture.completedFuture(null);
-                    }
-
-                    if (RECOVERY_CODE_PATTERN.matcher(code).matches()) {
-                        return processRecoveryCodeAsync(player, name, code);
-                    } else if (TOTP_CODE_VERIFIER.isValidCode(totpToken, code)) {
-                        return completeTotpLoginAsync(player, name);
-                    } else {
-                        handleWrongTotpAttempt(player, name);
-                        return CompletableFuture.completedFuture(null);
-                    }
-                })
-                .whenComplete((result, throwable) -> {
-                    if (throwable != null) {
-                        player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.queryError));
-                    }
-                    inProcess.remove(name);
-                });
+                        if (RECOVERY_CODE_PATTERN.matcher(code).matches()) {
+                            return processRecoveryCodeAsync(player, name, code);
+                        } else if (TOTP_CODE_VERIFIER.isValidCode(totpToken, code)) {
+                            return completeTotpLoginAsync(player, name);
+                        } else {
+                            processFailedTotpAttempt(player, name);
+                            return CompletableFuture.completedFuture(null);
+                        }
+                    })
+                    .whenComplete((result, throwable) -> {
+                        if (throwable != null) {
+                            player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.queryError));
+                        }
+                    }));
     }
 
     public boolean requireTotpChallenge(ProxiedPlayer player, AuthUser user) {
@@ -144,7 +140,7 @@ public class TotpManager {
                 });
     }
 
-    private void handleWrongTotpAttempt(ProxiedPlayer player, String name) {
+    private void processFailedTotpAttempt(ProxiedPlayer player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = totpAttempts.merge(lowerName, 1, Integer::sum);
         if (attempts >= MainConfig.IMP.auth.totp.maxAttempts) {
@@ -152,7 +148,7 @@ public class TotpManager {
             totpAttempts.remove(lowerName);
             player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.player.kick.totpTooManyAttempts));
             if (MainConfig.IMP.auth.totp.banPlayer) {
-                BanCache.addTotpBan(((InetSocketAddress) player.getSocketAddress()).getAddress().getHostAddress());
+                BanCache.addTotpBan(BungeeUtils.getIp(player));
             }
             return;
         }
@@ -169,7 +165,7 @@ public class TotpManager {
                         return database.getRecoveryCodeRepository().removeCode(hashedCode)
                                 .thenCompose(result -> completeTotpLoginAsync(player, name));
                     } else {
-                        handleWrongTotpAttempt(player, name);
+                        processFailedTotpAttempt(player, name);
                         return CompletableFuture.completedFuture(null);
                     }
                 });
