@@ -508,10 +508,6 @@ public class AuthManager {
         connect(player, authServer);
     }
 
-    private void connectToBackend(PostLoginEvent event) {
-        getBackend(event.getPlayer()).ifPresent(event::setTarget);
-    }
-
     private void connectToBackend(ProxiedPlayer player) {
         getBackend(player).ifPresent(server -> connect(player, server));
     }

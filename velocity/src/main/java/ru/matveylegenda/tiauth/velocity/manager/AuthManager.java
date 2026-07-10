@@ -440,10 +440,6 @@ public class AuthManager {
         connect(player, serverOpt.get());
     }
 
-    private void connectToBackend(PlayerChooseInitialServerEvent event) {
-        getBackend(event.getPlayer()).ifPresent(event::setInitialServer);
-    }
-
     private CompletableFuture<Void> connectToBackend(Player player) {
         return getBackend(player)
                 .map(backend -> connect(player, backend))
