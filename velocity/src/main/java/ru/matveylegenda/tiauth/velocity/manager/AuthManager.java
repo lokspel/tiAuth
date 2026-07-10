@@ -297,7 +297,7 @@ public class AuthManager {
                         if (PremiumCache.isPremium(name) || (sessionIP != null && sessionIP.equals(remoteIp))) {
                             AuthCache.setAuthenticated(name);
                             if (event != null) {
-                                connectToBackend(event);
+                                plugin.getServer().getServer(MainConfig.IMP.servers.backend).ifPresent(event::setInitialServer);
                             } else {
                                 connectToBackend(player);
                             }
@@ -466,12 +466,15 @@ public class AuthManager {
     }
 
     private CompletableFuture<Void> connect(Player player, RegisteredServer target) {
-        return player.getCurrentServer().map(current -> {
-            if (!current.getServer().equals(target)) {
-                return player.createConnectionRequest(target).connect();
-            }
-            return CompletableFuture.completedFuture(true);
-        }).orElseGet(() -> player.createConnectionRequest(target).connect())
+        return player.getCurrentServer()
+                .map(current -> {
+                    if (!current.getServer().equals(target)) {
+                        return player.createConnectionRequest(target).connect();
+                    }
+                    return CompletableFuture.completedFuture(true);
+                })
+                .orElseGet(() -> player.createConnectionRequest(target).connect())
+                .exceptionally(throwable -> null)
                 .thenRun(() -> {});
     }
 

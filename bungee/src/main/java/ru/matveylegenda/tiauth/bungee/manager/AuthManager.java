@@ -308,7 +308,7 @@ public class AuthManager {
                             AuthCache.setAuthenticated(name);
 
                             if (event != null) {
-                                connectToBackend(event);
+                                event.setTarget(plugin.getProxy().getServerInfo(MainConfig.IMP.servers.backend));
                             } else {
                                 connectToBackend(player);
                             }
