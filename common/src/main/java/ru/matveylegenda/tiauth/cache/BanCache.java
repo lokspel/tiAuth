@@ -12,7 +12,7 @@ public class BanCache {
     private static final BanInstance AUTH = new BanInstance(MainConfig.IMP.auth.banTime);
     private static final BanInstance TOTP = new BanInstance(MainConfig.IMP.auth.totp.banTime);
 
-    public void addPlayer(String ip) {
+    public void addBan(String ip) {
         AUTH.add(ip);
     }
 

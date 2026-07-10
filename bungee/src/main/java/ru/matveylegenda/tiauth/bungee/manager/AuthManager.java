@@ -102,8 +102,8 @@ public class AuthManager {
                     }));
     }
 
-    public CompletableFuture<Boolean> registerPlayer(String playerName, String password, String ip) {
-        return registerUserAsync(playerName, password, ip)
+    public CompletableFuture<Boolean> registerUser(String username, String password, String ip) {
+        return registerUserAsync(username, password, ip)
                 .thenApply(result -> true)
                 .exceptionally(throwable -> false);
     }
@@ -135,8 +135,8 @@ public class AuthManager {
                     }));
     }
 
-    public CompletableFuture<Boolean> unregisterPlayer(String playerName) {
-        return database.getAuthUserRepository().deleteUser(playerName)
+    public CompletableFuture<Boolean> unregisterUser(String username) {
+        return database.getAuthUserRepository().deleteUser(username)
                 .thenApply(result -> true)
                 .exceptionally(throwable -> false);
     }
@@ -221,8 +221,8 @@ public class AuthManager {
                     }));
     }
 
-    public CompletableFuture<Boolean> changePasswordPlayer(String playerName, String password) {
-        return updatePasswordAsync(playerName, password)
+    public CompletableFuture<Boolean> changePasswordUser(String username, String password) {
+        return updatePasswordAsync(username, password)
                 .thenApply(result -> true)
                 .exceptionally(throwable -> false);
     }
@@ -401,11 +401,11 @@ public class AuthManager {
                 });
     }
 
-    private CompletableFuture<Void> registerUserAsync(String playerName, String password, String ip) {
+    private CompletableFuture<Void> registerUserAsync(String username, String password, String ip) {
         return database.getAuthUserRepository().registerUser(
                 new AuthUser(
-                        playerName.toLowerCase(Locale.ROOT),
-                        playerName,
+                        username.toLowerCase(Locale.ROOT),
+                        username,
                         hash.hashPassword(password),
                         false,
                         ip
@@ -413,9 +413,9 @@ public class AuthManager {
         );
     }
 
-    private CompletableFuture<Void> updatePasswordAsync(String playerName, String password) {
+    private CompletableFuture<Void> updatePasswordAsync(String username, String password) {
         String hashedPassword = hash.hashPassword(password);
-        return database.getAuthUserRepository().updatePassword(playerName, hashedPassword);
+        return database.getAuthUserRepository().updatePassword(username, hashedPassword);
     }
 
     private CompletableFuture<Void> completeRegistrationAsync(ProxiedPlayer player, String name, String password) {
@@ -444,7 +444,7 @@ public class AuthManager {
         if (attempts >= MainConfig.IMP.auth.loginAttempts) {
             player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.player.kick.tooManyAttempts));
             if (MainConfig.IMP.auth.banPlayer) {
-                BanCache.addPlayer(BungeeUtils.getIp(player));
+                BanCache.addBan(BungeeUtils.getIp(player));
             }
             loginAttempts.remove(lowerName);
             return;

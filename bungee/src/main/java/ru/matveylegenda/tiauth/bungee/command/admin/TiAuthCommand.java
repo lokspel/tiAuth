@@ -85,7 +85,7 @@ public class TiAuthCommand extends Command {
                 }
 
                 String playerName = args[1];
-                authManager.unregisterPlayer(playerName)
+                authManager.unregisterUser(playerName)
                         .thenAccept(success -> {
                             if (!success) {
                                 BungeeUtils.sendMessage(
@@ -128,7 +128,7 @@ public class TiAuthCommand extends Command {
 
                 String playerName = args[1];
                 String password = args[2];
-                authManager.changePasswordPlayer(playerName, password)
+                authManager.changePasswordUser(playerName, password)
                         .thenAccept(success -> {
                             if (!success) {
                                 BungeeUtils.sendMessage(
@@ -220,7 +220,7 @@ public class TiAuthCommand extends Command {
                                 return null;
                             }
 
-                            return authManager.registerPlayer(playerName, password, null)
+                            return authManager.registerUser(playerName, password, null)
                                     .thenAccept(success -> {
                                         if (!success) {
                                             BungeeUtils.sendMessage(
