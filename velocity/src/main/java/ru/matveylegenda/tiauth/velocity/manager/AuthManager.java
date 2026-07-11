@@ -39,7 +39,6 @@ public class AuthManager {
 
     private final PlayerLock playerLock = new PlayerLock();
     private final Set<String> pendingVerifications = ConcurrentHashMap.newKeySet();
-    private final Set<String> totpPendingPlayers = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> loginAttempts = new ConcurrentHashMap<>();
     private final TiAuth plugin;
     private final Database database;
@@ -234,18 +233,6 @@ public class AuthManager {
 
     public void clearPendingVerification(String playerName) {
         pendingVerifications.remove(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public boolean isTotpPending(String playerName) {
-        return totpPendingPlayers.contains(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void setTotpPending(String playerName) {
-        totpPendingPlayers.add(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void clearTotpPending(String playerName) {
-        totpPendingPlayers.remove(playerName.toLowerCase(Locale.ROOT));
     }
 
     public void togglePremium(Player player) {

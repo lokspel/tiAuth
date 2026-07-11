@@ -20,6 +20,7 @@ import ru.matveylegenda.tiauth.velocity.storage.CachedComponents;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -33,6 +34,7 @@ public class TotpManager {
     private final TiAuth plugin;
     private final Database database;
 
+    private final Set<String> totpPendingPlayers = ConcurrentHashMap.newKeySet();
     private final PlayerLock playerLock = new PlayerLock();
     private final Map<String, Integer> totpAttempts = new ConcurrentHashMap<>();
     private final Map<String, String> totpEnableSecrets = new ConcurrentHashMap<>();
@@ -44,7 +46,15 @@ public class TotpManager {
     }
 
     public boolean isTotpPending(String playerName) {
-        return authManager.isTotpPending(playerName);
+        return totpPendingPlayers.contains(playerName.toLowerCase(Locale.ROOT));
+    }
+
+    public void setTotpPending(String playerName) {
+        totpPendingPlayers.add(playerName.toLowerCase(Locale.ROOT));
+    }
+
+    public void clearTotpPending(String playerName) {
+        totpPendingPlayers.remove(playerName.toLowerCase(Locale.ROOT));
     }
 
     public void setTotpEnableSecret(String playerName, String secret) {
@@ -61,7 +71,7 @@ public class TotpManager {
 
     public void clearTotpState(String playerName) {
         String lowerName = playerName.toLowerCase(Locale.ROOT);
-        authManager.clearTotpPending(playerName);
+        clearTotpPending(playerName);
         authManager.clearPendingVerification(playerName);
         totpAttempts.remove(lowerName);
         playerLock.unlock(playerName);
@@ -70,20 +80,20 @@ public class TotpManager {
     public void processTotpChallenge(Player player, String code) {
         String name = player.getUsername();
 
-        if (!authManager.isTotpPending(name)) {
+        if (!isTotpPending(name)) {
             return;
         }
 
         playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
                     .thenCompose(user -> {
                         if (user == null) {
-                            authManager.clearTotpPending(name);
+                            clearTotpPending(name);
                             player.sendMessage(CachedComponents.IMP.player.login.notRegistered);
                             return CompletableFuture.completedFuture(null);
                         }
 
                         if (user.getTotpToken() == null || user.getTotpToken().isEmpty()) {
-                            authManager.clearTotpPending(name);
+                            clearTotpPending(name);
                             return authManager.loginPlayer(player, false)
                                     .thenRun(() -> player.sendMessage(CachedComponents.IMP.player.login.success));
                         }
@@ -115,7 +125,7 @@ public class TotpManager {
     public boolean requireTotpChallenge(Player player, AuthUser user) {
         String totpToken = user.getTotpToken();
         if (MainConfig.IMP.auth.totp.enabled && totpToken != null && !totpToken.isEmpty()) {
-            authManager.setTotpPending(player.getUsername());
+            setTotpPending(player.getUsername());
             plugin.getTaskManager().cancelTasks(player);
             plugin.getTaskManager().startTotpTimeoutTask(player);
             plugin.getTaskManager().startDisplayTimerTask(player, MainConfig.IMP.auth.totp.timeoutSeconds);
@@ -127,7 +137,7 @@ public class TotpManager {
 
     private CompletableFuture<Void> completeTotpLoginAsync(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
-        authManager.clearTotpPending(name);
+        clearTotpPending(name);
         totpAttempts.remove(lowerName);
 
         return authManager.loginPlayer(player, false)
@@ -141,7 +151,7 @@ public class TotpManager {
         String lowerName = name.toLowerCase(Locale.ROOT);
         int attempts = totpAttempts.merge(lowerName, 1, Integer::sum);
         if (attempts >= MainConfig.IMP.auth.totp.maxAttempts) {
-            authManager.clearTotpPending(name);
+            clearTotpPending(name);
             totpAttempts.remove(lowerName);
             player.disconnect(CachedComponents.IMP.player.kick.totpTooManyAttempts);
             if (MainConfig.IMP.auth.totp.banPlayer) {
