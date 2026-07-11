@@ -39,19 +39,15 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 public class AuthManager {
 
     private final PlayerLock playerLock = new PlayerLock();
-    private final Set<String> pendingVerifications = ConcurrentHashMap.newKeySet();
-    private final Map<String, Integer> loginAttempts = new ConcurrentHashMap<>();
     private final TiAuth plugin;
     private final Database database;
     private final TaskManager taskManager;
@@ -148,12 +144,12 @@ public class AuthManager {
             return;
         }
 
-        if (plugin.getTotpManager().isTotpPending(name)) {
+        if (AuthCache.isTotpPending(name)) {
             BungeeUtils.sendMessage(player, CachedMessages.IMP.player.totp.prompt);
             return;
         }
 
-        if (isPendingVerification(name)) {
+        if (AuthCache.isPendingVerification(name)) {
             BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.alreadyLogged);
             return;
         }
@@ -230,22 +226,6 @@ public class AuthManager {
         taskManager.cancelTasks(player);
         AuthCache.logout(player.getName());
         SessionCache.removePlayer(player.getName());
-    }
-
-    public void resetLoginAttempts(String lowerName) {
-        loginAttempts.remove(lowerName);
-    }
-
-    public boolean isPendingVerification(String playerName) {
-        return pendingVerifications.contains(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void setPendingVerification(String playerName) {
-        pendingVerifications.add(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void clearPendingVerification(String playerName) {
-        pendingVerifications.remove(playerName.toLowerCase(Locale.ROOT));
     }
 
     public void togglePremium(ProxiedPlayer player) {
@@ -426,14 +406,14 @@ public class AuthManager {
 
     private void processFailedLogin(ProxiedPlayer player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
-        int attempts = loginAttempts.merge(lowerName, 1, Integer::sum);
+        int attempts = AuthCache.incrementLoginAttempts(lowerName);
 
         if (attempts >= MainConfig.IMP.auth.loginAttempts) {
             player.disconnect(TextComponent.fromLegacy(CachedMessages.IMP.player.kick.tooManyAttempts));
             if (MainConfig.IMP.auth.banPlayer) {
                 BanCache.addBan(BungeeUtils.getIp(player));
             }
-            loginAttempts.remove(lowerName);
+            AuthCache.resetLoginAttempts(lowerName);
             return;
         }
 
@@ -463,18 +443,20 @@ public class AuthManager {
             player.sendTitle(title);
         }
 
-        loginAttempts.remove(lowerName);
+        AuthCache.resetLoginAttempts(lowerName);
 
         return CompletableFuture.completedFuture(null);
     }
 
     private void authenticatePlayer(ProxiedPlayer player, String name, boolean forceLogin) {
         String ip = BungeeUtils.getIp(player);
+        String lowerName = name.toLowerCase(Locale.ROOT);
 
         AuthCache.setAuthenticated(name);
         database.getAuthUserRepository().updateLastLogin(name);
         database.getAuthUserRepository().updateLastIp(name, ip);
         SessionCache.addPlayer(name, ip);
+        AuthCache.resetLoginAttempts(lowerName);
         taskManager.cancelTasks(player);
 
         PlayerAuthEvent playerAuthEvent = new PlayerAuthEvent(player, forceLogin);

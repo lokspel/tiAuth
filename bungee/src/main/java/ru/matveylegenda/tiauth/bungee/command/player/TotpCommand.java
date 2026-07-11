@@ -20,6 +20,7 @@ import ru.matveylegenda.tiauth.bungee.manager.AuthManager;
 import ru.matveylegenda.tiauth.bungee.manager.TotpManager;
 import ru.matveylegenda.tiauth.bungee.storage.CachedMessages;
 import ru.matveylegenda.tiauth.bungee.util.BungeeUtils;
+import ru.matveylegenda.tiauth.cache.AuthCache;
 import ru.matveylegenda.tiauth.config.MainConfig;
 import ru.matveylegenda.tiauth.database.Database;
 import ru.matveylegenda.tiauth.util.EncryptionUtils;
@@ -50,7 +51,7 @@ public class TotpCommand extends Command {
         String name = player.getName();
 
         if (args.length == 1 && !args[0].equalsIgnoreCase("enable") && !args[0].equalsIgnoreCase("disable")) {
-            if (totpManager.isTotpPending(name)) {
+            if (AuthCache.isTotpPending(name)) {
                 totpManager.processTotpChallenge(player, args[0]);
                 return;
             }
@@ -113,7 +114,7 @@ public class TotpCommand extends Command {
                     }
 
                     String secret = secretGenerator.generate();
-                    totpManager.setTotpEnableSecret(name, secret);
+                    AuthCache.setTotpEnableSecret(name, secret);
 
                     QrData qrData = new QrData.Builder()
                             .label(name)
@@ -164,7 +165,7 @@ public class TotpCommand extends Command {
             return;
         }
 
-        String secret = totpManager.getTotpEnableSecret(name);
+        String secret = AuthCache.getTotpEnableSecret(name);
         if (secret == null) {
             BungeeUtils.sendMessage(player, CachedMessages.IMP.player.totp.enableUsage);
             return;
@@ -182,7 +183,7 @@ public class TotpCommand extends Command {
         if (TotpManager.TOTP_CODE_VERIFIER.isValidCode(secret, args[1])) {
             plugin.getDatabase().getAuthUserRepository().updateTotpToken(name, secretEncrypted)
                     .thenAccept(result -> {
-                        totpManager.removeTotpEnableSecret(name);
+                        AuthCache.removeTotpEnableSecret(name);
                         BungeeUtils.sendMessage(player, CachedMessages.IMP.player.totp.successful);
                     })
                     .exceptionally(throwable -> {

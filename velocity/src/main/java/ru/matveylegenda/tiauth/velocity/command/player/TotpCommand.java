@@ -14,6 +14,7 @@ import java.util.logging.Level;
 import java.util.regex.Pattern;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
+import ru.matveylegenda.tiauth.cache.AuthCache;
 import ru.matveylegenda.tiauth.config.MainConfig;
 import ru.matveylegenda.tiauth.database.Database;
 import ru.matveylegenda.tiauth.util.EncryptionUtils;
@@ -51,7 +52,7 @@ public class TotpCommand implements SimpleCommand {
         String name = player.getUsername();
 
         if (args.length == 1 && !args[0].equalsIgnoreCase("enable") && !args[0].equalsIgnoreCase("disable")) {
-            if (totpManager.isTotpPending(name)) {
+            if (AuthCache.isTotpPending(name)) {
                 totpManager.processTotpChallenge(player, args[0]);
                 return;
             }
@@ -114,7 +115,7 @@ public class TotpCommand implements SimpleCommand {
                     }
 
                     String secret = secretGenerator.generate();
-                    totpManager.setTotpEnableSecret(name, secret);
+                    AuthCache.setTotpEnableSecret(name, secret);
 
                     QrData qrData = new QrData.Builder()
                             .label(name)
@@ -166,7 +167,7 @@ public class TotpCommand implements SimpleCommand {
             return;
         }
 
-        String secret = totpManager.getTotpEnableSecret(name);
+        String secret = AuthCache.getTotpEnableSecret(name);
         if (secret == null) {
             VelocityUtils.sendMessage(player, CachedComponents.IMP.player.totp.enableUsage);
             return;
@@ -184,7 +185,7 @@ public class TotpCommand implements SimpleCommand {
         if (TotpManager.TOTP_CODE_VERIFIER.isValidCode(secret, args[1])) {
             plugin.getDatabase().getAuthUserRepository().updateTotpToken(name, secretEncrypted)
                     .thenAccept(result -> {
-                        totpManager.removeTotpEnableSecret(name);
+                        AuthCache.removeTotpEnableSecret(name);
                         VelocityUtils.sendMessage(player, CachedComponents.IMP.player.totp.successful);
                     })
                     .exceptionally(throwable -> {

@@ -5,6 +5,7 @@ import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeGenerator;
 import dev.samstevens.totp.code.DefaultCodeVerifier;
 import dev.samstevens.totp.time.SystemTimeProvider;
+import ru.matveylegenda.tiauth.cache.AuthCache;
 import ru.matveylegenda.tiauth.cache.BanCache;
 import ru.matveylegenda.tiauth.config.MainConfig;
 import ru.matveylegenda.tiauth.database.Database;
@@ -19,10 +20,7 @@ import ru.matveylegenda.tiauth.velocity.util.VelocityUtils;
 import ru.matveylegenda.tiauth.velocity.storage.CachedComponents;
 
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 public class TotpManager {
@@ -34,10 +32,7 @@ public class TotpManager {
     private final TiAuth plugin;
     private final Database database;
 
-    private final Set<String> totpPendingPlayers = ConcurrentHashMap.newKeySet();
     private final PlayerLock playerLock = new PlayerLock();
-    private final Map<String, Integer> totpAttempts = new ConcurrentHashMap<>();
-    private final Map<String, String> totpEnableSecrets = new ConcurrentHashMap<>();
 
     public TotpManager(AuthManager authManager, TiAuth plugin) {
         this.authManager = authManager;
@@ -45,55 +40,31 @@ public class TotpManager {
         this.database = plugin.getDatabase();
     }
 
-    public boolean isTotpPending(String playerName) {
-        return totpPendingPlayers.contains(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void setTotpPending(String playerName) {
-        totpPendingPlayers.add(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void clearTotpPending(String playerName) {
-        totpPendingPlayers.remove(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void setTotpEnableSecret(String playerName, String secret) {
-        totpEnableSecrets.put(playerName.toLowerCase(Locale.ROOT), secret);
-    }
-
-    public String getTotpEnableSecret(String playerName) {
-        return totpEnableSecrets.get(playerName.toLowerCase(Locale.ROOT));
-    }
-
-    public void removeTotpEnableSecret(String playerName) {
-        totpEnableSecrets.remove(playerName.toLowerCase(Locale.ROOT));
-    }
-
     public void clearTotpState(String playerName) {
         String lowerName = playerName.toLowerCase(Locale.ROOT);
-        clearTotpPending(playerName);
-        authManager.clearPendingVerification(playerName);
-        totpAttempts.remove(lowerName);
+        AuthCache.clearTotpPending(playerName);
+        AuthCache.clearPendingVerification(playerName);
+        AuthCache.resetTotpAttempts(lowerName);
         playerLock.unlock(playerName);
     }
 
     public void processTotpChallenge(Player player, String code) {
         String name = player.getUsername();
 
-        if (!isTotpPending(name)) {
+        if (!AuthCache.isTotpPending(name)) {
             return;
         }
 
         playerLock.execute(name, () -> database.getAuthUserRepository().getUser(name)
                     .thenCompose(user -> {
                         if (user == null) {
-                            clearTotpPending(name);
+                            AuthCache.clearTotpPending(name);
                             player.sendMessage(CachedComponents.IMP.player.login.notRegistered);
                             return CompletableFuture.completedFuture(null);
                         }
 
                         if (user.getTotpToken() == null || user.getTotpToken().isEmpty()) {
-                            clearTotpPending(name);
+                            AuthCache.clearTotpPending(name);
                             return authManager.loginPlayer(player, false)
                                     .thenRun(() -> player.sendMessage(CachedComponents.IMP.player.login.success));
                         }
@@ -125,7 +96,7 @@ public class TotpManager {
     public boolean requireTotpChallenge(Player player, AuthUser user) {
         String totpToken = user.getTotpToken();
         if (MainConfig.IMP.auth.totp.enabled && totpToken != null && !totpToken.isEmpty()) {
-            setTotpPending(player.getUsername());
+            AuthCache.setTotpPending(player.getUsername());
             plugin.getTaskManager().cancelTasks(player);
             plugin.getTaskManager().startTotpTimeoutTask(player);
             plugin.getTaskManager().startDisplayTimerTask(player, MainConfig.IMP.auth.totp.timeoutSeconds);
@@ -137,22 +108,19 @@ public class TotpManager {
 
     private CompletableFuture<Void> completeTotpLoginAsync(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
-        clearTotpPending(name);
-        totpAttempts.remove(lowerName);
+        AuthCache.clearTotpPending(name);
+        AuthCache.resetTotpAttempts(lowerName);
 
         return authManager.loginPlayer(player, false)
-                .thenRun(() -> {
-                    player.sendMessage(CachedComponents.IMP.player.login.success);
-                    authManager.resetLoginAttempts(lowerName);
-                });
+                .thenRun(() -> player.sendMessage(CachedComponents.IMP.player.login.success));
     }
 
     private void processFailedTotpAttempt(Player player, String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
-        int attempts = totpAttempts.merge(lowerName, 1, Integer::sum);
+        int attempts = AuthCache.incrementTotpAttempts(lowerName);
         if (attempts >= MainConfig.IMP.auth.totp.maxAttempts) {
-            clearTotpPending(name);
-            totpAttempts.remove(lowerName);
+            AuthCache.clearTotpPending(name);
+            AuthCache.resetTotpAttempts(lowerName);
             player.disconnect(CachedComponents.IMP.player.kick.totpTooManyAttempts);
             if (MainConfig.IMP.auth.totp.banPlayer) {
                 BanCache.addTotpBan(VelocityUtils.getIp(player));
