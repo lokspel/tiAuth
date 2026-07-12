@@ -108,6 +108,10 @@ public final class TiAuth extends Plugin {
                 logger.log(Level.WARNING, "Error during database closing", e);
             }
         }
+
+        if (worker != null) {
+            worker.stop();
+        }
     }
 
     private void loadLibraries() {
