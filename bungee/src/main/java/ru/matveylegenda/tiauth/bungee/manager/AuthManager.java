@@ -185,8 +185,7 @@ public class AuthManager {
 
     public CompletableFuture<Void> loginPlayer(ProxiedPlayer player, boolean forceLogin) {
         String name = player.getName();
-        authenticatePlayer(player, name, forceLogin);
-        return CompletableFuture.completedFuture(null);
+        return authenticatePlayer(player, name, forceLogin);
     }
 
     public void changePasswordPlayer(ProxiedPlayer player, String oldPassword, String newPassword) {
@@ -431,24 +430,23 @@ public class AuthManager {
 
         BungeeUtils.sendMessage(player, CachedMessages.IMP.player.login.success);
 
-        authenticatePlayer(player, name, false);
+        return authenticatePlayer(player, name, false)
+                .thenRun(() -> {
+                    if (MainConfig.IMP.title.enabledOnAuth) {
+                        Title title = ProxyServer.getInstance().createTitle();
+                        title.title(TextComponent.fromLegacy(CachedMessages.IMP.player.title.onAuthTitle));
+                        title.subTitle(TextComponent.fromLegacy(CachedMessages.IMP.player.title.onAuthSubTitle));
+                        title.fadeIn(0);
+                        title.stay(21);
+                        title.fadeOut(6);
+                        player.sendTitle(title);
+                    }
 
-        if (MainConfig.IMP.title.enabledOnAuth) {
-            Title title = ProxyServer.getInstance().createTitle();
-            title.title(TextComponent.fromLegacy(CachedMessages.IMP.player.title.onAuthTitle));
-            title.subTitle(TextComponent.fromLegacy(CachedMessages.IMP.player.title.onAuthSubTitle));
-            title.fadeIn(0);
-            title.stay(21);
-            title.fadeOut(6);
-            player.sendTitle(title);
-        }
-
-        AuthCache.resetLoginAttempts(lowerName);
-
-        return CompletableFuture.completedFuture(null);
+                    AuthCache.resetLoginAttempts(lowerName);
+                });
     }
 
-    private void authenticatePlayer(ProxiedPlayer player, String name, boolean forceLogin) {
+    private CompletableFuture<Void> authenticatePlayer(ProxiedPlayer player, String name, boolean forceLogin) {
         String ip = BungeeUtils.getIp(player);
         String lowerName = name.toLowerCase(Locale.ROOT);
 
@@ -465,6 +463,8 @@ public class AuthManager {
         if (playerAuthEvent.isMoveToBackendServer()) {
             connectToBackend(player);
         }
+
+        return CompletableFuture.completedFuture(null);
     }
 
     private void connectToAuthServer(PostLoginEvent event) {
